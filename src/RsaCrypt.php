@@ -28,7 +28,7 @@ readonly class RsaCrypt
         protected string $key,
         protected string $cipher = 'aes-128-cbc',
         protected string $hmac_algo = 'sha256',
-        protected int $openssl_sign_algorithm = OPENSSL_ALGO_SHA1,
+        protected int    $openssl_sign_algorithm = OPENSSL_ALGO_SHA1,
         protected int    $expires_in = 30
     )
     {
