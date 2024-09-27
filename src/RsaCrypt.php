@@ -46,7 +46,7 @@ readonly class RsaCrypt
     }
 
     /**
-     * 对称加密
+     * 对称加密 & RSA非对称私钥签名
      * @param array $data 数据包
      * @return array
      * @throws ErrorException
@@ -95,7 +95,7 @@ readonly class RsaCrypt
     }
 
     /**
-     * 对称解密
+     * 对称解密 & RSA非对称公钥验签
      * @param string $payload 有效载荷
      * @param string $signature 签名
      * @return array 数据包
