@@ -54,39 +54,9 @@ readonly class RsaCrypt
     public function encrypt(array $data): array
     {
         try {
-            $aesKey = $this->getKey();
-            $cipher = $this->getCipher();
-            $ivLen = openssl_cipher_iv_length($cipher);
-            $iv = openssl_random_pseudo_bytes($ivLen);
-            $noncestr = bin2hex(openssl_random_pseudo_bytes(8));
-            $timestamp = time();
+            [$payload, $hmac] = CryptHelper::aesEncrypt($data, $this->getKey(), $this->getCipher(), $this->getHmacAlgo(), $this->getExpiresIn());
 
-            // 附加数据
-            $addReq = ['_noncestr' => $noncestr];
-            $realData = array_merge($addReq, $data);
-            $plaintext = json_encode($realData);
-
-            // 加密
-            $ciphertext_raw = openssl_encrypt($plaintext, $cipher, $aesKey, OPENSSL_RAW_DATA, $iv);
-            if (false === $ciphertext_raw) {
-                throw new InvalidArgumentException(openssl_error_string() ?: 'Encrypt AES CBC error.');
-            }
-
-            $payload = base64_encode(json_encode([
-                'iv' => base64_encode($iv),
-                'data' => base64_encode($ciphertext_raw),
-                'timestamp' => $timestamp,
-                'expires_in' => $this->getExpiresIn()
-            ]));
-
-            // 使用 HMAC 方法生成带有密钥的散列值
-            $hmac = hash_hmac($this->getHmacAlgo(), $payload, $aesKey);
-
-            // 非对称私钥加签
-            if (!openssl_sign($hmac, $signature, openssl_pkey_get_private(file_get_contents($this->getPrivateKey())), $this->getOpensslSignAlgorithm())) {
-                throw new InvalidArgumentException(openssl_error_string() ?: 'openssl_sign error.');
-            }
-            $signature = base64_encode($signature);
+            $signature = $this->opensslSignature($hmac);
 
             return compact('payload', 'signature');
         } catch (Throwable $throwable) {
@@ -104,37 +74,43 @@ readonly class RsaCrypt
     public function decrypt(string $payload, string $signature): array
     {
         try {
-            $aesKey = $this->getKey();
-            $cipher = $this->getCipher();
+            $key = $this->getKey();
 
             // 使用 HMAC 方法生成带有密钥的散列值
-            $hmac = hash_hmac($this->getHmacAlgo(), $payload, $aesKey);
-            // 非对称公钥验签
-            if (1 === openssl_verify($hmac, base64_decode($signature), openssl_pkey_get_public(file_get_contents($this->getPublicKey())), $this->getOpensslSignAlgorithm())) {
-                $_payload = json_decode(base64_decode($payload), true);
-                $iv = base64_decode($_payload['iv']);
-                $ciphertext_raw = base64_decode($_payload['data']);
-                $timestamp = $_payload['timestamp'];
-                $expires_in = $_payload['expires_in'];
-
-                // 验证时间戳
-                if ($expires_in < abs(time() - $timestamp)) {
-                    throw new InvalidArgumentException('时间戳验证失败，误差超过' . $expires_in . '秒');
-                }
-
-                // 解密
-                $original_plaintext = openssl_decrypt($ciphertext_raw, $cipher, $aesKey, OPENSSL_RAW_DATA, $iv);
-                if (false === $original_plaintext) {
-                    throw new InvalidArgumentException(openssl_error_string() ?: 'Decrypt AES CBC error.');
-                }
-
-                return json_decode($original_plaintext, true);
+            $hmac = hash_hmac($this->getHmacAlgo(), $payload, $key);
+            // 验签
+            if (!$this->opensslVerify($hmac, $signature)) {
+                throw new InvalidArgumentException('签名验证失败');
             }
 
-            throw new InvalidArgumentException('签名验证失败');
+            return CryptHelper::aesDecrypt($payload, $key, $this->getCipher());
         } catch (Throwable $throwable) {
             throw new ErrorException($throwable->getMessage(), $throwable->getCode());
         }
+    }
+
+    /**
+     * 非对称私钥签名
+     * @param string $data
+     * @return string
+     */
+    public function opensslSignature(string $data): string
+    {
+        if (!openssl_sign($data, $signature, openssl_pkey_get_private(file_get_contents($this->getPrivateKey())), $this->getOpensslSignAlgorithm())) {
+            throw new InvalidArgumentException(openssl_error_string() ?: 'openssl_sign error.');
+        }
+        return base64_encode($signature);
+    }
+
+    /**
+     * 非对称公钥验签
+     * @param string $data
+     * @param string $signature
+     * @return bool
+     */
+    public function opensslVerify(string $data, string $signature): bool
+    {
+        return 1 === openssl_verify($data, base64_decode($signature), openssl_pkey_get_public(file_get_contents($this->getPublicKey())), $this->getOpensslSignAlgorithm());
     }
 
     /**
